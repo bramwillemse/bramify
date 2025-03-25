@@ -1,0 +1,1 @@
+"""Bramify - Personal AI assistant for hour registration."""
