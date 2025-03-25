@@ -33,8 +33,18 @@ def generate_token():
         # Create OAuth flow
         flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
         
-        # Run the OAuth flow
-        credentials = flow.run_local_server(port=0)
+        # Get the credentials file data to read the configured redirect URIs
+        with open(CREDENTIALS_FILE, 'r') as f:
+            creds_data = json.load(f)
+        
+        # Run the OAuth flow - handle both desktop and web application credentials
+        if 'web' in creds_data:
+            print("Using web application OAuth flow...")
+            # Web application credentials (Google might have pre-configured redirect URIs)
+            credentials = flow.run_local_server(port=8080)
+        else:
+            # Desktop application credentials
+            credentials = flow.run_local_server(port=0)
         
         # Save credentials to token.json
         token_dir = os.path.dirname(TOKEN_FILE)

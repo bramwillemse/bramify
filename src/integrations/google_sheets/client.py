@@ -51,18 +51,36 @@ class GoogleSheetsClient:
                     try:
                         creds_data = json.load(token)
                         credentials = Credentials.from_authorized_user_info(creds_data, scopes)
+                        logger.info("Successfully loaded token file")
                     except Exception as e:
                         logger.error(f"Error loading token file: {e}")
+            else:
+                logger.error(f"Token file not found at {self.token_file}")
             
             # If credentials don't exist or are invalid, get new ones
             if not credentials or not credentials.valid:
                 if credentials and credentials.expired and credentials.refresh_token:
-                    credentials.refresh(Request())
-                else:
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        self.credentials_file, scopes)
-                    logger.error("Token not found or invalid. Please run generate_token.py script first.")
-                    raise ValueError("Token file not found or invalid. Run generate_token.py first.")
+                    try:
+                        logger.info("Refreshing expired token")
+                        credentials.refresh(Request())
+                        logger.info("Token refreshed successfully")
+                    except Exception as e:
+                        logger.error(f"Error refreshing token: {e}")
+                        # Fall through to error message below
+                
+                if not credentials or not credentials.valid:
+                    error_msg = f"""
+                    ======================================================================
+                    AUTHORIZATION REQUIRED
+                    
+                    Token file is missing or invalid. Please follow the instructions in 
+                    manual_setup.md to generate a new token.
+                    
+                    The token should be saved to: {self.token_file}
+                    ======================================================================
+                    """
+                    logger.error(error_msg)
+                    raise ValueError("Token file not found or invalid. See logs for details.")
                 
                 # Save the credentials
                 token_dir = os.path.dirname(self.token_file)
