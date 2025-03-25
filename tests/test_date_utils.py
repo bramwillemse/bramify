@@ -25,8 +25,8 @@ def test_parse_date_formats():
     assert parse_date_text("On 15-01-2023 I worked on Project X") == "2023-01-15"
     assert parse_date_text("On 15/01/2023 I worked on Project X") == "2023-01-15"
     
-    # American format
-    assert parse_date_text("On 01/15/2023 I worked on Project X") == "2023-01-15"
+    # Short year format
+    assert parse_date_text("On 15-01-23 I worked on Project X") == "2023-01-15"
 
 def test_get_date_range_today():
     """Test getting date range for 'today'."""
