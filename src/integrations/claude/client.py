@@ -33,15 +33,26 @@ class ClaudeClient:
         """
         prompt = f"""
         You are an assistant that helps extract work information from text.
+        The user is from the Netherlands and will often write in Dutch or a mix of Dutch and English.
         Analyze the following text and extract:
         
         1. If this is a work entry (description of work done)
-        2. Client name
-        3. Project name
-        4. Hours worked
-        5. Whether the work is billable (default to true if unclear)
-        6. Date (use today if not specified)
+        2. Client name (klant)
+        3. Project name (project)
+        4. Hours worked (uren)
+        5. Whether the work is billable (facturabel) - default to true if unclear
+        6. Date (datum) - use today if not specified, format as DD-MM-YYYY for Dutch format
         7. Brief description of the work
+        
+        Important Dutch vocabulary to help you understand:
+        - "uur" or "uren" = hours
+        - "klant" = client
+        - "project" = project
+        - "vandaag" = today
+        - "gisteren" = yesterday
+        - "vorige week" = last week
+        - "declarabel" or "facturabel" = billable
+        - "niet declarabel" or "niet facturabel" = not billable
         
         Format your response as JSON with the following fields:
         {{
@@ -50,7 +61,7 @@ class ClaudeClient:
             "project": "project name or null if not found",
             "hours": number of hours or null if not found,
             "billable": true/false,
-            "date": "YYYY-MM-DD",
+            "date": "DD-MM-YYYY",
             "description": "brief description of the work"
         }}
         

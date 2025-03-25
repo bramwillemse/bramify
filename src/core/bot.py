@@ -44,6 +44,8 @@ class BramifyBot:
         # Command handlers
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("help", self.cmd_help))
+        self.app.add_handler(CommandHandler("enable_production", self.cmd_enable_production))
+        self.app.add_handler(CommandHandler("test_mode", self.cmd_test_mode))
         
         # Message handler for text messages (lowest priority)
         self.app.add_handler(MessageHandler(
@@ -55,6 +57,9 @@ class BramifyBot:
         
         # Error handler
         self.app.add_error_handler(self.error_handler)
+        
+        # Initialize test mode
+        self.test_mode = True
     
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
@@ -76,11 +81,15 @@ class BramifyBot:
             "🤖 *Bramify Help* 🤖\n\n"
             "*Core Commands:*\n"
             "/start - Start interacting with the bot\n"
-            "/help - Show this help message\n\n"
+            "/help - Show this help message\n"
+            "/test_mode - Write hours to test sheet only\n"
+            "/enable_production - Write hours to the actual sheet\n\n"
             
             "*Hour Registration:*\n"
             "Just tell me what you worked on today, and I'll register your hours. "
             "For example: 'Today I worked on Project X for Client Y for 4 hours.'\n\n"
+            
+            f"*Current Mode:* {'Test Mode (data goes to test sheet)' if self.test_mode else 'Production Mode (data goes to actual sheet)'}\n\n"
         )
         
         # Add plugin help text
@@ -127,18 +136,24 @@ class BramifyBot:
                     "description": analysis.get("description")
                 }
                 
-                # Save to Google Sheets
-                self.sheets.add_work_entry(work_data)
+                # Use the bot's test_mode setting
+                success = self.sheets.add_work_entry(work_data, test_mode=self.test_mode)
                 
-                return (
-                    f"✅ I've registered your work:\n\n"
-                    f"📅 Date: {work_data['date']}\n"
-                    f"👥 Client: {work_data['client']}\n"
-                    f"📋 Project: {work_data['project']}\n"
-                    f"⏱️ Hours: {work_data['hours']}\n"
-                    f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
-                    f"📝 Description: {work_data['description'][:50]}..."
-                )
+                # Prepare response
+                response = f"✅ I've registered your work:\n\n"
+                response += f"📅 Date: {work_data['date']}\n"
+                response += f"👥 Client: {work_data['client']}\n"
+                response += f"📋 Project: {work_data['project']}\n"
+                response += f"⏱️ Hours: {work_data['hours']}\n"
+                response += f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
+                response += f"📝 Description: {work_data['description'][:50]}...\n\n"
+                
+                if self.test_mode:
+                    response += f"🔍 Note: This entry was added to a test sheet for validation. "
+                    response += f"Once you confirm it's working correctly, you can use the /enable_production "
+                    response += f"command to start writing to your actual sheet."
+                
+                return response
             else:
                 # Generate a response for a regular conversation
                 return await self.claude.generate_response(message)
@@ -168,6 +183,28 @@ class BramifyBot:
             update.message.reply_text("Sorry, you are not authorized to use this bot.")
             
         return is_allowed
+    
+    async def cmd_enable_production(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /enable_production command to switch to production mode."""
+        if not self._is_user_allowed(update):
+            return
+            
+        self.test_mode = False
+        await update.message.reply_text(
+            "✅ Production mode enabled. Your work hours will now be saved to the actual sheet. "
+            "Use /test_mode to switch back to test mode if needed."
+        )
+        
+    async def cmd_test_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /test_mode command to switch to test mode."""
+        if not self._is_user_allowed(update):
+            return
+            
+        self.test_mode = True
+        await update.message.reply_text(
+            "✅ Test mode enabled. Your work hours will be saved to a test sheet for validation. "
+            "Use /enable_production to switch to production mode when ready."
+        )
     
     async def setup(self):
         """Set up the bot, including loading plugins."""
