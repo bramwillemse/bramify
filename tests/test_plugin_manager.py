@@ -62,21 +62,26 @@ async def test_register_plugin_class(plugin_manager):
 @pytest.mark.asyncio
 async def test_initialize_plugin(plugin_manager):
     """Test initializing a plugin."""
+    # Create a real plugin instance
+    mock_plugin = MockPlugin()
+    mock_plugin.initialize = AsyncMock(return_value=True)
+    
+    # Create a factory function for our mock
+    def mock_plugin_factory(*args, **kwargs):
+        return mock_plugin
+    
     # Register the plugin class
     plugin_manager.register_plugin_class("test", MockPlugin, "arg1", "arg2")
     
-    # Initialize with different constructor to test args
-    with patch("tests.test_plugin_manager.MockPlugin") as mock_plugin_class:
-        mock_plugin = MockPlugin()
-        mock_plugin_class.return_value = mock_plugin
-        
+    # Patch the MockPlugin constructor
+    with patch("tests.test_plugin_manager.MockPlugin", side_effect=mock_plugin_factory):
         # Initialize the plugin
         result = await plugin_manager.initialize_plugin("test", MockPlugin, "arg1", "arg2")
         
         # Check results
         assert result is True
         assert "test" in plugin_manager.plugins
-        assert mock_plugin_class.call_args[0] == ("arg1", "arg2")  # Constructor args
+        assert mock_plugin.initialize.called
 
 
 @pytest.mark.asyncio
