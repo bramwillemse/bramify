@@ -1,75 +1,162 @@
-"""Tests for Claude API integration."""
+"""Tests for the Claude client module."""
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+import json
+import os
+from unittest.mock import patch, MagicMock, AsyncMock
+from datetime import datetime
+
+# Import patch
+from tests.patch_imports import patch_imports
+patch_imports()
 
 from src.integrations.claude.client import ClaudeClient
 
+
+class MockAnthropicResponse:
+    """Mock response from Anthropic API."""
+    
+    def __init__(self, content):
+        """Initialize with content."""
+        self.content = [{
+            "text": content,
+            "type": "text"
+        }]
+
+
 @pytest.fixture
-def mock_anthropic():
-    """Mock the Anthropic client and API response."""
+def mock_anthropic_client():
+    """Create a mock Anthropic client."""
     mock_client = MagicMock()
-    mock_messages = AsyncMock()
-    mock_client.messages.create = mock_messages
-    
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="""
-    {
-        "is_work_entry": true,
-        "client": "TestClient",
-        "project": "TestProject",
-        "hours": 4,
-        "billable": true,
-        "date": "2023-01-15",
-        "description": "Working on the test feature"
+    mock_client.messages = MagicMock()
+    mock_client.messages.create = MagicMock()
+    return mock_client
+
+
+@pytest.fixture
+def claude_client(mock_anthropic_client):
+    """Create a ClaudeClient with mocked Anthropic client."""
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test_api_key"}):
+        with patch("anthropic.Anthropic", return_value=mock_anthropic_client):
+            client = ClaudeClient()
+            return client
+
+
+@pytest.mark.asyncio
+async def test_analyze_work_entry_valid(claude_client, mock_anthropic_client):
+    """Test analyzing a valid work entry."""
+    # Mock response
+    mock_response = {
+        "is_work_entry": True,
+        "client": "Test Client",
+        "hours": 3.5,
+        "billable": True,
+        "date": "25-03-2025",
+        "description": "Test work",
+        "hourly_rate": 85
     }
-    """)]
     
-    mock_messages.return_value = mock_response
+    mock_anthropic_client.messages.create.return_value = MockAnthropicResponse(json.dumps(mock_response))
     
-    with patch('anthropic.Anthropic', return_value=mock_client):
-        yield mock_client
-
-@pytest.mark.asyncio
-async def test_analyze_work_entry(mock_anthropic):
-    """Test analyzing a work entry message."""
-    client = ClaudeClient()
-    message = "I worked 4 hours today on TestProject for TestClient"
+    # Test
+    result = await claude_client.analyze_work_entry("3.5 hours for Test Client: Test work")
     
-    result = await client.analyze_work_entry(message)
-    
+    # Verify
     assert result["is_work_entry"] is True
-    assert result["client"] == "TestClient"
-    assert result["project"] == "TestProject"
-    assert result["hours"] == 4
+    assert result["client"] == "Test Client"
+    assert result["hours"] == 3.5
     assert result["billable"] is True
-    assert "date" in result
-    assert "description" in result
+    assert result["date"] == "25-03-2025"
+    assert result["description"] == "Test work"
+    
+    # Check that the API was called with the right parameters
+    mock_anthropic_client.messages.create.assert_called_once()
+    call_args = mock_anthropic_client.messages.create.call_args[1]
+    assert call_args["model"] == claude_client.model
+    assert "User text: 3.5 hours for Test Client: Test work" in call_args["messages"][0]["content"]
+
 
 @pytest.mark.asyncio
-async def test_generate_response(mock_anthropic):
-    """Test generating a response to a user message."""
-    client = ClaudeClient()
-    message = "Can you help me with my hours?"
+async def test_analyze_work_entry_invalid_json(claude_client, mock_anthropic_client):
+    """Test handling invalid JSON in response."""
+    # Mock invalid JSON response
+    mock_anthropic_client.messages.create.return_value = MockAnthropicResponse("Not valid JSON")
     
-    # Configure the mock to return a text response
-    mock_anthropic.messages.create.return_value.content[0].text = "I can help you track your hours. What did you work on today?"
+    # Test
+    result = await claude_client.analyze_work_entry("Hello, how are you?")
     
-    response = await client.generate_response(message)
-    
-    assert response == "I can help you track your hours. What did you work on today?"
-    mock_anthropic.messages.create.assert_called_once()
-
-@pytest.mark.asyncio
-async def test_analyze_work_entry_error(mock_anthropic):
-    """Test error handling in work entry analysis."""
-    client = ClaudeClient()
-    message = "I worked today"
-    
-    # Make the API call raise an exception
-    mock_anthropic.messages.create.side_effect = Exception("API Error")
-    
-    result = await client.analyze_work_entry(message)
-    
-    # Should return a default response on error
+    # Verify
     assert result["is_work_entry"] is False
+
+
+@pytest.mark.asyncio
+async def test_analyze_work_entry_exception(claude_client, mock_anthropic_client):
+    """Test handling exception during API call."""
+    # Mock exception
+    mock_anthropic_client.messages.create.side_effect = Exception("API error")
+    
+    # Test
+    result = await claude_client.analyze_work_entry("3.5 hours for Test Client")
+    
+    # Verify
+    assert result["is_work_entry"] is False
+
+
+@pytest.mark.asyncio
+async def test_analyze_work_entry_no_date(claude_client, mock_anthropic_client):
+    """Test analyzing a work entry with no date."""
+    # Mock response with no date
+    mock_response = {
+        "is_work_entry": True,
+        "client": "Test Client",
+        "hours": 3.5,
+        "billable": True,
+        "date": None,
+        "description": "Test work",
+        "hourly_rate": 85
+    }
+    
+    mock_anthropic_client.messages.create.return_value = MockAnthropicResponse(json.dumps(mock_response))
+    
+    # Test
+    with patch("src.integrations.claude.client.datetime") as mock_datetime:
+        mock_now = MagicMock()
+        mock_now.strftime.return_value = "25-03-2025"
+        mock_datetime.now.return_value = mock_now
+        
+        result = await claude_client.analyze_work_entry("3.5 hours for Test Client")
+    
+    # Verify
+    assert result["date"] == "25-03-2025"  # Should default to today
+
+
+@pytest.mark.asyncio
+async def test_generate_response(claude_client, mock_anthropic_client):
+    """Test generating a response."""
+    # Mock response
+    mock_anthropic_client.messages.create.return_value = MockAnthropicResponse("Test response")
+    
+    # Test
+    result = await claude_client.generate_response("Test message")
+    
+    # Verify
+    assert result == "Test response"
+    
+    # Check API call
+    mock_anthropic_client.messages.create.assert_called_once()
+    call_args = mock_anthropic_client.messages.create.call_args[1]
+    assert call_args["model"] == claude_client.model
+    assert call_args["messages"][0]["content"] == "Test message"
+
+
+@pytest.mark.asyncio
+async def test_generate_response_exception(claude_client, mock_anthropic_client):
+    """Test handling exception in generate_response."""
+    # Mock exception
+    mock_anthropic_client.messages.create.side_effect = Exception("API error")
+    
+    # Test
+    result = await claude_client.generate_response("Test message")
+    
+    # Verify
+    assert "Sorry, I'm having trouble" in result
