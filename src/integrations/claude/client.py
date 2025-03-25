@@ -38,31 +38,38 @@ class ClaudeClient:
         
         1. If this is a work entry (description of work done)
         2. Client name (klant)
-        3. Project name (project)
-        4. Hours worked (uren)
-        5. Whether the work is billable (facturabel) - default to true if unclear
-        6. Date (datum) - use today if not specified, format as DD-MM-YYYY for Dutch format
-        7. Brief description of the work
+        3. Hours worked (uren)
+        4. Whether the work is billable (facturabel) - default to true if unclear
+        5. Date (datum) - use today if not specified, format as DD-MM-YYYY for Dutch format
+        6. Description of the work (beschrijving)
+        
+        The spreadsheet has the following columns:
+        - Datum (Date)
+        - Klant (Client)
+        - Beschrijving (Description)
+        - Uren (Hours - billable)
+        - Uren onbetaald (Unbillable hours)
+        - Omzet (Revenue)
         
         Important Dutch vocabulary to help you understand:
         - "uur" or "uren" = hours
         - "klant" = client
-        - "project" = project
         - "vandaag" = today
         - "gisteren" = yesterday
         - "vorige week" = last week
         - "declarabel" or "facturabel" = billable
         - "niet declarabel" or "niet facturabel" = not billable
+        - "onbetaald" = unpaid/unbillable
         
         Format your response as JSON with the following fields:
         {{
             "is_work_entry": true/false,
             "client": "client name or null if not found",
-            "project": "project name or null if not found",
             "hours": number of hours or null if not found,
             "billable": true/false,
             "date": "DD-MM-YYYY",
-            "description": "brief description of the work"
+            "description": "description of the work",
+            "hourly_rate": 85
         }}
         
         User text: {text}

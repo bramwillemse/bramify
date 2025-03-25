@@ -110,14 +110,14 @@ class GoogleSheetsClient:
                 
         except Exception as e:
             logger.error(f"Error detecting sheet structure: {e}")
-            # Use default column mapping as fallback
+            # Use default column mapping based on Bram's spreadsheet
             self.column_mapping = {
-                "date": 0,
-                "client": 1,
-                "project": 2,
-                "hours": 3,
-                "billable": 4,
-                "description": 5,
+                "date": 0,      # Datum
+                "client": 1,    # Klant
+                "description": 2, # Beschrijving
+                "hours": 3,     # Uren
+                "unbillable_hours": 4, # Uren onbetaald
+                "revenue": 5,   # Omzet
             }
     
     def _detect_columns(self):
@@ -136,24 +136,24 @@ class GoogleSheetsClient:
             headers = result['values'][0]
             logger.info(f"Detected headers: {headers}")
             
-            # Initialize column mapping with fallback values
+            # Initialize column mapping with fallback values based on Bram's spreadsheet
             self.column_mapping = {
-                "date": 0,
-                "client": 1,
-                "project": 2,
-                "hours": 3,
-                "billable": 4,
-                "description": 5,
+                "date": 0,      # Datum
+                "client": 1,    # Klant
+                "description": 2, # Beschrijving
+                "hours": 3,     # Uren
+                "unbillable_hours": 4, # Uren onbetaald
+                "revenue": 5,   # Omzet
             }
             
-            # Map common header names to our fields
+            # Map common header names to the fields in Bram's spreadsheet
             header_mappings = {
                 "date": ["date", "datum", "dag", "day"],
                 "client": ["client", "klant", "klanten", "customer", "opdrachtgever"],
-                "project": ["project", "opdracht", "task"],
+                "description": ["description", "beschrijving", "omschrijving", "notes", "notities"],
                 "hours": ["hours", "uren", "tijd", "time", "duur", "duration"],
-                "billable": ["billable", "facturabel", "declarabel", "facturable"],
-                "description": ["description", "beschrijving", "omschrijving", "notes", "notities"]
+                "unbillable_hours": ["unbillable hours", "uren onbetaald", "onbetaalde uren", "non-billable"],
+                "revenue": ["revenue", "omzet", "turnover", "income"]
             }
             
             # Try to match headers to our fields
@@ -249,20 +249,40 @@ class GoogleSheetsClient:
             # Convert work_data to a row based on the column mapping
             row = [""] * (max(self.column_mapping.values()) + 2)  # +2 for potential timestamp and safety
             
-            # Fill in the data
-            row[self.column_mapping["date"]] = work_data.get("date", datetime.now().strftime("%d-%m-%Y"))
-            row[self.column_mapping["client"]] = work_data.get("client", "")
-            row[self.column_mapping["project"]] = work_data.get("project", "")
-            row[self.column_mapping["hours"]] = work_data.get("hours", 0)
+            # Format Dutch weekday + date format: "Monday 1 January 2025"
+            try:
+                date_obj = datetime.strptime(work_data.get("date", datetime.now().strftime("%d-%m-%Y")), "%d-%m-%Y")
+                weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                months = ["January", "February", "March", "April", "May", "June", 
+                          "July", "August", "September", "October", "November", "December"]
+                formatted_date = f"{weekdays[date_obj.weekday()]} {date_obj.day} {months[date_obj.month-1]} {date_obj.year}"
+                row[self.column_mapping["date"]] = formatted_date
+            except:
+                # Fallback to simple date format if parsing fails
+                row[self.column_mapping["date"]] = work_data.get("date", datetime.now().strftime("%d-%m-%Y"))
             
-            # Handle billable field - adapt to different formats
-            billable_value = work_data.get("billable", True)
-            if isinstance(billable_value, bool):
-                row[self.column_mapping["billable"]] = "Ja" if billable_value else "Nee"
-            else:
-                row[self.column_mapping["billable"]] = billable_value
-                
+            # Client and description
+            row[self.column_mapping["client"]] = work_data.get("client", "")
             row[self.column_mapping["description"]] = work_data.get("description", "")
+            
+            # Handle billable/unbillable hours
+            is_billable = work_data.get("billable", True)
+            hours = work_data.get("hours", 0)
+            
+            if is_billable:
+                row[self.column_mapping["hours"]] = hours
+                row[self.column_mapping["unbillable_hours"]] = ""
+            else:
+                row[self.column_mapping["hours"]] = ""
+                row[self.column_mapping["unbillable_hours"]] = hours
+            
+            # Calculate revenue (only for billable hours)
+            # Assuming a default hourly rate, or you could add rate info to work_data
+            hourly_rate = work_data.get("hourly_rate", 85)  # Default €85/hour
+            if is_billable and hours:
+                row[self.column_mapping["revenue"]] = float(hours) * hourly_rate
+            else:
+                row[self.column_mapping["revenue"]] = ""
             
             # Add timestamp if there's room
             timestamp_col = max(self.column_mapping.values()) + 1

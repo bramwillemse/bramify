@@ -143,10 +143,17 @@ class BramifyBot:
                 response = f"✅ I've registered your work:\n\n"
                 response += f"📅 Date: {work_data['date']}\n"
                 response += f"👥 Client: {work_data['client']}\n"
-                response += f"📋 Project: {work_data['project']}\n"
                 response += f"⏱️ Hours: {work_data['hours']}\n"
                 response += f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
-                response += f"📝 Description: {work_data['description'][:50]}...\n\n"
+                response += f"📝 Description: {work_data['description'][:50]}...\n"
+                
+                # Show revenue for billable hours
+                if work_data.get('billable', True) and work_data.get('hours'):
+                    hourly_rate = work_data.get('hourly_rate', 85)
+                    revenue = float(work_data['hours']) * hourly_rate
+                    response += f"💵 Revenue: €{revenue:.2f}\n\n"
+                else:
+                    response += "\n"
                 
                 if self.test_mode:
                     response += f"🔍 Note: This entry was added to a test sheet for validation. "
