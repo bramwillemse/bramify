@@ -218,6 +218,35 @@ class TestBramifyBot:
         
         # Verify response
         mock_update.message.reply_text.assert_called_once()
+        
+    @pytest.mark.asyncio
+    async def test_command_aliases(self, bot):
+        """Test that both command formats (with and without underscore) work."""
+        # In the actual implementation, we verify that the handler is registered twice
+        # Here we'll just check that both command formats would call the same method
+        from src.core.bot import BramifyBot
+        from unittest.mock import patch
+        
+        # Check that both enableproduction and enable_production call the same method
+        bot_instance = BramifyBot()
+        
+        # Check the registered handlers by looking at their callbacks
+        command_handlers = [h for h in bot_instance.app.add_handler.call_args_list 
+                           if hasattr(h[0][0], 'command')]
+        
+        # Get handlers for our commands
+        enable_prod_handlers = [h for h in command_handlers 
+                               if h[0][0].command in ['enable_production', 'enableproduction']]
+        test_mode_handlers = [h for h in command_handlers 
+                             if h[0][0].command in ['test_mode', 'testmode']]
+        
+        # Verify both command formats are registered
+        assert len(enable_prod_handlers) == 2
+        assert len(test_mode_handlers) == 2
+        
+        # Verify both command formats call the same handler method
+        assert enable_prod_handlers[0][0][0].callback == enable_prod_handlers[1][0][0].callback
+        assert test_mode_handlers[0][0][0].callback == test_mode_handlers[1][0][0].callback
     
     @pytest.mark.asyncio
     async def test_cmd_test_mode(self, bot, mock_update):

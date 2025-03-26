@@ -45,7 +45,9 @@ class BramifyBot:
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("help", self.cmd_help))
         self.app.add_handler(CommandHandler("enable_production", self.cmd_enable_production))
+        self.app.add_handler(CommandHandler("enableproduction", self.cmd_enable_production))  # Add alias without underscore
         self.app.add_handler(CommandHandler("test_mode", self.cmd_test_mode))
+        self.app.add_handler(CommandHandler("testmode", self.cmd_test_mode))  # Add alias without underscore
         
         # Message handler for text messages (lowest priority)
         self.app.add_handler(MessageHandler(
@@ -82,8 +84,8 @@ class BramifyBot:
             "*Core Commands:*\n"
             "/start - Start interacting with the bot\n"
             "/help - Show this help message\n"
-            "/test_mode - Write hours to test sheet only\n"
-            "/enable_production - Write hours to the actual sheet\n\n"
+            "/test_mode or /testmode - Write hours to test sheet only\n"
+            "/enable_production or /enableproduction - Write hours to the actual sheet\n\n"
             
             "*Hour Registration:*\n"
             "Just tell me what you worked on today, and I'll register your hours. "
