@@ -2,17 +2,26 @@ version: '3.8'
 
 services:
   bramify:
-    build: .
+    image: python:3.11-slim
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8080:8080"  # For OAuth callback
     volumes:
-      - ./config:/app/config
-      - ./logs:/app/logs
+      - .:/app
+    working_dir: /app
+    command: >
+      bash -c "
+        pip install -r requirements.txt &&
+        echo 'Checking service account file:' &&
+        cat config/service_account.json | grep project_id &&
+        cat config/service_account.json | grep client_email &&
+        echo 'Spreadsheet ID:' &&
+        grep GOOGLE_SHEETS_SPREADSHEET_ID .env &&
+        echo 'Starting application...' &&
+        python src/main.py
+      "
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}
-      - GOOGLE_SHEETS_CREDENTIALS_FILE=config/credentials.json
+      - GOOGLE_SHEETS_CREDENTIALS_FILE=config/service_account.json

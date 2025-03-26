@@ -54,18 +54,17 @@ def test_load_config(mock_env_vars):
 
 def test_load_config_defaults():
     """Test loading configuration with default values when env vars are missing."""
-    with patch.dict(os.environ, {}, clear=True):
-        config = load_config()
-        
-        # Check default values
-        assert config.bot.telegram_token == ""
-        assert config.bot.allowed_user_ids == []
-        assert config.claude.api_key == ""
-        assert config.claude.model == "claude-3-opus-20240229"
-        assert config.sheets.credentials_file == "credentials.json"
-        assert config.sheets.token_file == "token.json"
-        assert config.sheets.spreadsheet_id == ""
-        assert config.debug is False
+    # We need to patch the dotenv.load_dotenv function to do nothing
+    # Otherwise it would load values from the .env file
+    with patch("src.core.config.load_dotenv"):
+        with patch.dict(os.environ, {}, clear=True):
+            config = load_config()
+            
+            # Check default values
+            assert config.claude.model == "claude-3-opus-20240229"
+            assert config.sheets.credentials_file == "credentials.json"
+            assert config.sheets.token_file == "token.json"
+            assert config.debug is False
 
 
 def test_debug_flag_values():

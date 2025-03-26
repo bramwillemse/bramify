@@ -16,10 +16,13 @@ class ClaudeClient:
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not set in environment variables")
             
+        # Create the Anthropic client with the API key
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = "claude-3-opus-20240229"  # Use the latest model
         
-        logger.info("Claude client initialized")
+        # Define the model to use - using Claude 3 Haiku which is good for these tasks
+        self.model = os.getenv("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+        
+        logger.info(f"Claude client initialized with model {self.model}")
     
     async def analyze_work_entry(self, text: str) -> Dict[str, Any]:
         """
@@ -31,21 +34,13 @@ class ClaudeClient:
         Returns:
             Dict containing extracted work information or empty if not a work entry
         """
-        prompt = f"""
+        system_prompt = """
         You are an assistant that helps extract work information from text.
         The user is from the Netherlands and will often write in Dutch or a mix of Dutch and English.
-        Analyze the following text and extract:
-        
-        1. If this is a work entry (description of work done)
-        2. Client name (klant)
-        3. Hours worked (uren)
-        4. Whether the work is billable (facturabel) - default to true if unclear
-        5. Date (datum) - use today if not specified, format as DD-MM-YYYY for Dutch format
-        6. Description of the work (beschrijving)
         
         The spreadsheet has the following columns:
         - Datum (Date)
-        - Klant (Client)
+        - Klant (Client) 
         - Beschrijving (Description)
         - Uren (Hours - billable)
         - Uren onbetaald (Unbillable hours)
@@ -61,8 +56,8 @@ class ClaudeClient:
         - "niet declarabel" or "niet facturabel" = not billable
         - "onbetaald" = unpaid/unbillable
         
-        Format your response as JSON with the following fields:
-        {{
+        Format your response as ONLY valid JSON with the following fields:
+        {
             "is_work_entry": true/false,
             "client": "client name or null if not found",
             "hours": number of hours or null if not found,
@@ -70,26 +65,40 @@ class ClaudeClient:
             "date": "DD-MM-YYYY",
             "description": "description of the work",
             "hourly_rate": 85
-        }}
+        }
+        """
+        
+        user_prompt = f"""
+        Analyze the following text and extract:
+        
+        1. If this is a work entry (description of work done)
+        2. Client name (klant)
+        3. Hours worked (uren)
+        4. Whether the work is billable (facturabel) - default to true if unclear
+        5. Date (datum) - use today if not specified, format as DD-MM-YYYY for Dutch format
+        6. Description of the work (beschrijving)
         
         User text: {text}
         """
         
         try:
-            message = await self.client.messages.create(
+            # Create a message with the Claude client using Messages API
+            # Note: with newer versions of Anthropic client, this is not an async method
+            response = self.client.messages.create(
                 model=self.model,
                 max_tokens=1000,
+                system=system_prompt,
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": user_prompt}
                 ]
             )
             
-            # Parse the response as JSON
-            response_text = message.content[0].text
+            # Extract the response text
+            response_text = response.content[0].text
             
             # Extract JSON from the response (in case there's additional text)
-            json_start = response_text.find("{{")
-            json_end = response_text.rfind("}}") + 1
+            json_start = response_text.find("{")
+            json_end = response_text.rfind("}") + 1
             
             if json_start >= 0 and json_end > json_start:
                 json_str = response_text[json_start:json_end]
@@ -100,7 +109,7 @@ class ClaudeClient:
             
             # Set date to today if not provided
             if "date" not in result or not result["date"]:
-                result["date"] = datetime.now().strftime("%Y-%m-%d")
+                result["date"] = datetime.now().strftime("%d-%m-%Y")
                 
             return result
                 
@@ -126,9 +135,12 @@ class ClaudeClient:
             You are Bramify, a personal assistant specialized in hour registration.
             You help users track their work hours in a friendly, conversational manner.
             Be concise, helpful, and maintain a professional but friendly tone.
+            The user is likely to write in Dutch, so respond in the same language the user used.
             """
             
-            response = await self.client.messages.create(
+            # Create a message with the Claude client using Messages API
+            # Note: with newer versions of Anthropic client, this is not an async method
+            response = self.client.messages.create(
                 model=self.model,
                 max_tokens=1000,
                 system=system_prompt,

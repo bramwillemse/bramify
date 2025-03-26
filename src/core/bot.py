@@ -219,7 +219,7 @@ class BramifyBot:
         await self.plugin_manager.load_plugins()
     
     async def run(self):
-        """Run the bot."""
+        """Run the bot with setup."""
         logger.info("Setting up Bramify")
         await self.setup()
         

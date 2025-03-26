@@ -7,7 +7,7 @@ from loguru import logger
 
 from core.bot import BramifyBot
 
-async def main():
+def main():
     """Initialize and run the Bramify application."""
     # Load environment variables
     load_dotenv()
@@ -17,10 +17,19 @@ async def main():
     logger.add("logs/bramify.log", rotation="10 MB", level="INFO")
     logger.info("Starting Bramify")
     
-    # Initialize and run the bot
+    # Initialize the bot
     bot = BramifyBot()
-    await bot.run()
-
+    
+    # Setup the event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Run setup in the event loop
+    loop.run_until_complete(bot.setup())
+    
+    # Let the application manage its own event loop
+    # This works better with python-telegram-bot
+    bot.app.run_polling(close_loop=False)
+    
 if __name__ == "__main__":
-    # Run the async main function
-    asyncio.run(main())
+    main()
