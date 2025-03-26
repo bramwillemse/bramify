@@ -257,71 +257,280 @@ class GoogleSheetsClient:
             # Determine target sheet
             target_sheet = self.test_sheet if test_mode else self.work_hours_sheet
             
-            # Format the data for insertion
-            row = [""] * (max(self.column_mapping.values()) + 2)  # +2 for possible timestamp column
+            # Format the row data
+            formatted_row = self._format_row_data(work_data)
             
-            # Add date
-            row[self.column_mapping["date"]] = work_data.get("date", datetime.now().strftime("%d-%m-%Y"))
+            # Get the date from work_data
+            date_str = work_data.get("date", datetime.now().strftime("%d-%m-%Y"))
+            client_str = work_data.get("client", "")
             
-            # Add client
-            row[self.column_mapping["client"]] = work_data.get("client", "")
+            # Try to find a row with matching date and empty client
+            date_row = self._find_date_row(target_sheet, date_str)
             
-            # Add description
-            row[self.column_mapping["description"]] = work_data.get("description", "")
-            
-            # Handle hours - billable vs unbillable
-            hours = work_data.get("hours")
-            is_billable = work_data.get("billable", True)
-            
-            if is_billable:
-                row[self.column_mapping["hours"]] = hours
-                row[self.column_mapping["unbillable_hours"]] = ""
-            else:
-                row[self.column_mapping["hours"]] = ""
-                row[self.column_mapping["unbillable_hours"]] = hours
+            # If using existing template with dates
+            if date_row > 0:
+                logger.info(f"Found existing date row at {date_row} for date {date_str}")
                 
-            # Calculate revenue (hourly rate × hours) if billable
-            hourly_rate = work_data.get("hourly_rate", 85)  # Default €85/hour
-            if is_billable and hours:
-                row[self.column_mapping["revenue"]] = float(hours) * hourly_rate
+                # Check if there's already an entry for this client on this date
+                client_row = self._find_client_row(target_sheet, date_str, client_str)
+                
+                if client_row > 0:
+                    # Update the existing row for this client
+                    logger.info(f"Updating existing row {client_row} for client {client_str}")
+                    row_to_update = client_row
+                else:
+                    # Create a new row below the date row or below the last client for this date
+                    logger.info(f"Adding new row for client {client_str} on date {date_str}")
+                    row_to_update = self._insert_row_after(target_sheet, date_row)
+                    
+                    # Copy the date to the new row
+                    self.sheets.spreadsheets().values().update(
+                        spreadsheetId=self.spreadsheet_id,
+                        range=f"{target_sheet}!{self._column_letter(self.column_mapping['date'])}{row_to_update}",
+                        valueInputOption="USER_ENTERED",
+                        body={"values": [[date_str]]}
+                    ).execute()
             else:
-                row[self.column_mapping["revenue"]] = ""
+                # If no existing date row found, find the next empty row
+                try:
+                    result = self.sheets.spreadsheets().values().get(
+                        spreadsheetId=self.spreadsheet_id,
+                        range=f"{target_sheet}!A:A"
+                    ).execute()
+                except Exception as e:
+                    logger.error(f"Error getting values for next row: {e}")
+                    result = {"values": []}
+                
+                values = result.get('values', [])
+                row_to_update = len(values) + 1
+                logger.info(f"No matching date row found, using next empty row: {row_to_update}")
             
-            # Add timestamp if there's room
-            timestamp_col = max(self.column_mapping.values()) + 1
-            row[timestamp_col] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-            
-            # Find the next empty row
+            # Update the row with our data
             try:
-                result = self.sheets.spreadsheets().values().get(
-                    spreadsheetId=self.spreadsheet_id,
-                    range=f"{target_sheet}!A:A"
-                ).execute()
-            except Exception as e:
-                logger.error(f"Error getting values for next row: {e}")
-                result = {"values": []}
-            
-            values = result.get('values', [])
-            next_row = len(values) + 1
-            
-            # Add the data
-            try:
+                # Get column letters for our range
+                start_col = 'A'
+                end_col = chr(65 + len(formatted_row) - 1)
+                
                 self.sheets.spreadsheets().values().update(
                     spreadsheetId=self.spreadsheet_id,
-                    range=f"{target_sheet}!A{next_row}:{chr(65 + len(row))}{next_row}",
+                    range=f"{target_sheet}!{start_col}{row_to_update}:{end_col}{row_to_update}",
                     valueInputOption="USER_ENTERED",
-                    body={"values": [row]}
+                    body={"values": [formatted_row]}
                 ).execute()
+                
+                logger.info(f"Added work entry for {client_str} to {target_sheet} row {row_to_update}")
+                return True
             except Exception as e:
-                logger.error(f"Error updating sheet with new row: {e}")
+                logger.error(f"Error updating sheet with row data: {e}")
                 return False
-            
-            logger.info(f"Added work entry for {work_data.get('client')} to {target_sheet}")
-            return True
             
         except Exception as e:
             logger.error(f"Error adding work entry to Google Sheets: {e}")
             return False
+    
+    def _format_row_data(self, work_data: Dict[str, Any]) -> list:
+        """Format work data into a row for the spreadsheet."""
+        # Create a row with enough columns
+        row = [""] * (max(self.column_mapping.values()) + 2)  # +2 for possible timestamp column
+        
+        # Add date
+        row[self.column_mapping["date"]] = work_data.get("date", datetime.now().strftime("%d-%m-%Y"))
+        
+        # Add client
+        row[self.column_mapping["client"]] = work_data.get("client", "")
+        
+        # Add description
+        row[self.column_mapping["description"]] = work_data.get("description", "")
+        
+        # Handle hours - billable vs unbillable
+        hours = work_data.get("hours")
+        is_billable = work_data.get("billable", True)
+        
+        if is_billable:
+            row[self.column_mapping["hours"]] = hours
+            row[self.column_mapping["unbillable_hours"]] = ""
+        else:
+            row[self.column_mapping["hours"]] = ""
+            row[self.column_mapping["unbillable_hours"]] = hours
+            
+        # Calculate revenue (hourly rate × hours) if billable
+        hourly_rate = work_data.get("hourly_rate", 85)  # Default €85/hour
+        if is_billable and hours:
+            row[self.column_mapping["revenue"]] = float(hours) * hourly_rate
+        else:
+            row[self.column_mapping["revenue"]] = ""
+        
+        # Add timestamp if there's room
+        timestamp_col = max(self.column_mapping.values()) + 1
+        row[timestamp_col] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        
+        return row
+    
+    def _column_letter(self, index: int) -> str:
+        """Convert a 0-based column index to a column letter (A, B, C, ..., Z, AA, AB, ...)."""
+        if index < 26:
+            return chr(65 + index)
+        else:
+            return chr(65 + (index // 26) - 1) + chr(65 + (index % 26))
+    
+    def _find_date_row(self, sheet_name: str, date_str: str) -> int:
+        """Find a row with the given date in the date column."""
+        try:
+            # Try multiple date formats
+            search_formats = [date_str]  # Original DD-MM-YYYY format
+            
+            # Try to parse the date to create additional formats
+            try:
+                if "-" in date_str:
+                    day, month, year = date_str.split("-")
+                    # Format like "Monday 15 January 2024"
+                    date_obj = datetime(int(year), int(month), int(day))
+                    weekday = date_obj.strftime("%A")
+                    day_num = str(int(day))  # Remove leading zero
+                    month_name = date_obj.strftime("%B")
+                    formatted_date = f"{weekday} {day_num} {month_name} {year}"
+                    search_formats.append(formatted_date)
+                    
+                    # Also try with Dutch weekday and month names
+                    dutch_weekdays = {
+                        "Monday": "Maandag",
+                        "Tuesday": "Dinsdag",
+                        "Wednesday": "Woensdag",
+                        "Thursday": "Donderdag",
+                        "Friday": "Vrijdag",
+                        "Saturday": "Zaterdag",
+                        "Sunday": "Zondag"
+                    }
+                    dutch_months = {
+                        "January": "januari",
+                        "February": "februari",
+                        "March": "maart",
+                        "April": "april",
+                        "May": "mei",
+                        "June": "juni",
+                        "July": "juli",
+                        "August": "augustus",
+                        "September": "september",
+                        "October": "oktober",
+                        "November": "november",
+                        "December": "december"
+                    }
+                    
+                    dutch_weekday = dutch_weekdays.get(weekday, weekday)
+                    dutch_month = dutch_months.get(month_name, month_name)
+                    
+                    dutch_date = f"{dutch_weekday} {day_num} {dutch_month} {year}"
+                    search_formats.append(dutch_date)
+                    
+                    # Also try with just day number and month, like "15 januari"
+                    search_formats.append(f"{day_num} {dutch_month}")
+                    search_formats.append(f"{day_num} {month_name}")
+            except Exception as e:
+                logger.error(f"Error formatting date {date_str}: {e}")
+            
+            # Get all data from the date column
+            result = self.sheets.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!{self._column_letter(self.column_mapping['date'])}:{self._column_letter(self.column_mapping['date'])}"
+            ).execute()
+            
+            values = result.get('values', [])
+            
+            # Search for the date in all formats
+            for i, cell in enumerate(values):
+                if not cell or not cell[0]:  # Skip empty cells
+                    continue
+                
+                cell_value = cell[0].strip()
+                for format_str in search_formats:
+                    # Case insensitive comparison and partial matching for dates with day/month only
+                    if (cell_value.lower() == format_str.lower() or 
+                        format_str.lower() in cell_value.lower()):
+                        return i + 1  # 1-based row index
+            
+            return 0  # Not found
+        except Exception as e:
+            logger.error(f"Error finding date row: {e}")
+            return 0
+    
+    def _find_client_row(self, sheet_name: str, date_str: str, client_str: str) -> int:
+        """Find a row with both the given date and client."""
+        try:
+            date_row = self._find_date_row(sheet_name, date_str)
+            if date_row == 0:
+                return 0
+            
+            # Get range from the date row to about 10 rows after (or to the end)
+            # This assumes clients for the same date are grouped together
+            result = self.sheets.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!{date_row}:{date_row+10}"
+            ).execute()
+            
+            values = result.get('values', [])
+            
+            # Start with the rows after the date row
+            for i, row in enumerate(values[1:], 1):  # Skip the date row itself
+                if len(row) <= self.column_mapping['client']:
+                    continue
+                    
+                # Check if this row has the same date and the client we're looking for
+                if (len(row) > self.column_mapping['date'] and 
+                    row[self.column_mapping['date']] and
+                    len(row) > self.column_mapping['client'] and
+                    row[self.column_mapping['client']] == client_str):
+                    return date_row + i
+            
+            return 0  # Not found
+        except Exception as e:
+            logger.error(f"Error finding client row: {e}")
+            return 0
+    
+    def _insert_row_after(self, sheet_name: str, row_index: int) -> int:
+        """Find the appropriate row to insert after the given row index."""
+        try:
+            # First, check if there are already client rows for this date
+            # by looking at the next ~5 rows to see if they have the same date
+            date_value = None
+            
+            # Get the date value from the original row
+            result = self.sheets.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{sheet_name}!{self._column_letter(self.column_mapping['date'])}{row_index}"
+            ).execute()
+            
+            if 'values' in result and result['values']:
+                date_value = result['values'][0][0]
+            
+            if not date_value:
+                return row_index + 1  # Just use the next row
+            
+            # Check the next several rows to find the last row with this date
+            last_date_row = row_index
+            for i in range(1, 6):  # Check up to 5 rows after
+                check_row = row_index + i
+                
+                # Check if this row has the same date
+                result = self.sheets.spreadsheets().values().get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{sheet_name}!{self._column_letter(self.column_mapping['date'])}{check_row}"
+                ).execute()
+                
+                if 'values' in result and result['values'] and result['values'][0]:
+                    check_date = result['values'][0][0]
+                    if check_date and (check_date == date_value or date_value in check_date):
+                        last_date_row = check_row
+                    else:
+                        break  # Different date, stop checking
+                else:
+                    break  # Empty row, stop checking
+            
+            # Return the row after the last row with this date
+            return last_date_row + 1
+            
+        except Exception as e:
+            logger.error(f"Error determining insert row: {e}")
+            return row_index + 1  # Just use the next row
     
     def get_work_entries(self, start_date: str = None, end_date: str = None, include_test: bool = True) -> List[Dict[str, Any]]:
         """
