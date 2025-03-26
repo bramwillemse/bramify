@@ -336,8 +336,12 @@ class GoogleSheetsClient:
         # Add date
         row[self.column_mapping["date"]] = work_data.get("date", datetime.now().strftime("%d-%m-%Y"))
         
-        # Add client
-        row[self.column_mapping["client"]] = work_data.get("client", "")
+        # Add client - use client code if available, otherwise use full client name
+        client_code = work_data.get("client_code", "")
+        if client_code:
+            row[self.column_mapping["client"]] = client_code
+        else:
+            row[self.column_mapping["client"]] = work_data.get("client", "")
         
         # Add description
         row[self.column_mapping["description"]] = work_data.get("description", "")

@@ -1,20 +1,24 @@
 """Core bot functionality for Bramify."""
 
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from loguru import logger
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 from core.config import load_config, AppConfig
 from core.plugin_manager import PluginManager
 from integrations.claude.client import ClaudeClient
 from integrations.google_sheets.client import GoogleSheetsClient
+from integrations.client_mapper import ClientMapper
 from integrations.telegram.utils import send_typing_action
 
 class BramifyBot:
     """Main bot class handling Telegram interactions."""
+    
+    # Define conversation states
+    WAITING_FOR_CLIENT_CODE = 1
     
     def __init__(self):
         """Initialize the Bramify bot with required integrations."""
@@ -27,6 +31,10 @@ class BramifyBot:
         # Initialize integrations
         self.claude = ClaudeClient()
         self.sheets = GoogleSheetsClient()
+        self.client_mapper = ClientMapper()
+        
+        # Conversation state tracking
+        self.pending_work_entries = {}  # User ID -> pending work entry
         
         # Initialize Telegram application
         self.app = Application.builder().token(self.config.bot.telegram_token).build()
@@ -48,6 +56,21 @@ class BramifyBot:
         self.app.add_handler(CommandHandler("enableproduction", self.cmd_enable_production))  # Add alias without underscore
         self.app.add_handler(CommandHandler("test_mode", self.cmd_test_mode))
         self.app.add_handler(CommandHandler("testmode", self.cmd_test_mode))  # Add alias without underscore
+        self.app.add_handler(CommandHandler("list_clients", self.cmd_list_clients))
+        
+        # Conversation handler for client code
+        conv_handler = ConversationHandler(
+            entry_points=[],  # This is handled by handle_message
+            states={
+                self.WAITING_FOR_CLIENT_CODE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_client_code)
+                ],
+            },
+            fallbacks=[CommandHandler("cancel", self.cancel_conversation)],
+            name="client_code_conversation",
+            persistent=False,
+        )
+        self.app.add_handler(conv_handler)
         
         # Message handler for text messages (lowest priority)
         self.app.add_handler(MessageHandler(
@@ -116,12 +139,17 @@ class BramifyBot:
         # Show typing indicator
         await send_typing_action(update)
         
-        # Process the message with Claude
-        response = await self._process_message(user_message, user_id)
+        # Process the message with Claude, passing the update object for conversation handling
+        response = await self._process_message(user_message, user_id, update)
         
+        # If it's a conversation state, don't respond here
+        if response == ConversationHandler.WAITING_FOR_CLIENT_CODE:
+            return self.WAITING_FOR_CLIENT_CODE
+        
+        # Otherwise, send the response
         await update.message.reply_text(response)
     
-    async def _process_message(self, message: str, user_id: int) -> str:
+    async def _process_message(self, message: str, user_id: int, update: Optional[Update] = None) -> str:
         """Process a message using Claude and extract work information if applicable."""
         try:
             # Analyze the message with Claude
@@ -138,31 +166,62 @@ class BramifyBot:
                     "description": analysis.get("description")
                 }
                 
-                # Use the bot's test_mode setting
-                success = self.sheets.add_work_entry(work_data, test_mode=self.test_mode)
+                # Check if we have a client code for this client
+                client_name = work_data.get("client", "")
+                client_code = None
                 
-                # Prepare response
-                response = f"✅ I've registered your work:\n\n"
-                response += f"📅 Date: {work_data['date']}\n"
-                response += f"👥 Client: {work_data['client']}\n"
-                response += f"⏱️ Hours: {work_data['hours']}\n"
-                response += f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
-                response += f"📝 Description: {work_data['description'][:50]}...\n"
+                if client_name:
+                    client_code = self.client_mapper.get_code(client_name)
                 
-                # Show revenue for billable hours
-                if work_data.get('billable', True) and work_data.get('hours'):
-                    hourly_rate = work_data.get('hourly_rate', 85)
-                    revenue = float(work_data['hours']) * hourly_rate
-                    response += f"💵 Revenue: €{revenue:.2f}\n\n"
+                # If we have a client code, add it to the work data
+                if client_code:
+                    work_data["client_code"] = client_code
+                    
+                    # Use the bot's test_mode setting
+                    success = self.sheets.add_work_entry(work_data, test_mode=self.test_mode)
+                    
+                    # Prepare response
+                    response = f"✅ I've registered your work:\n\n"
+                    response += f"📅 Date: {work_data['date']}\n"
+                    response += f"👥 Client: {work_data['client']} ({client_code})\n"
+                    response += f"⏱️ Hours: {work_data['hours']}\n"
+                    response += f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
+                    response += f"📝 Description: {work_data['description'][:50]}...\n"
+                    
+                    # Show revenue for billable hours
+                    if work_data.get('billable', True) and work_data.get('hours'):
+                        hourly_rate = work_data.get('hourly_rate', 85)
+                        revenue = float(work_data['hours']) * hourly_rate
+                        response += f"💵 Revenue: €{revenue:.2f}\n\n"
+                    else:
+                        response += "\n"
+                    
+                    if self.test_mode:
+                        response += f"🔍 Note: This entry was added to a test sheet for validation. "
+                        response += f"Once you confirm it's working correctly, you can use the /enableproduction "
+                        response += f"command to start writing to your actual sheet."
+                    
+                    return response
+                elif update:
+                    # We need a client code - store the work entry and ask for a code
+                    self.pending_work_entries[user_id] = work_data
+                    
+                    # Suggest a code
+                    suggested_code = self.client_mapper.suggest_code_for_client(client_name)
+                    
+                    # Ask for the client code
+                    prompt = f"I need a 3-letter client code for '{client_name}'.\n\n"
+                    prompt += f"Suggested code: {suggested_code}\n\n"
+                    prompt += "Please enter a 3-letter code for this client (or use the suggestion):"
+                    
+                    await update.message.reply_text(prompt)
+                    
+                    # Return to conversation handler
+                    return ConversationHandler.WAITING_FOR_CLIENT_CODE
                 else:
-                    response += "\n"
-                
-                if self.test_mode:
-                    response += f"🔍 Note: This entry was added to a test sheet for validation. "
-                    response += f"Once you confirm it's working correctly, you can use the /enable_production "
-                    response += f"command to start writing to your actual sheet."
-                
-                return response
+                    # No update object, so we can't start a conversation
+                    logger.error("No update object provided, can't request client code")
+                    return "Sorry, I can't process this work entry without knowing the client code."
             else:
                 # Generate a response for a regular conversation
                 return await self.claude.generate_response(message)
@@ -214,6 +273,105 @@ class BramifyBot:
             "✅ Test mode enabled. Your work hours will be saved to a test sheet for validation. "
             "Use /enable_production to switch to production mode when ready."
         )
+        
+    async def cmd_list_clients(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /list_clients command to show existing client codes."""
+        if not self._is_user_allowed(update):
+            return
+            
+        # Get all client mappings
+        mappings = self.client_mapper.get_all_mappings()
+        
+        if not mappings:
+            await update.message.reply_text(
+                "No client codes defined yet. Client codes will be created automatically when you log hours."
+            )
+            return
+        
+        # Format the list of clients
+        response = "📋 **Client Codes**\n\n"
+        for client_name, code in mappings.items():
+            # Show the original name if possible
+            response += f"• `{code}` - {client_name}\n"
+        
+        await update.message.reply_text(response, parse_mode="Markdown")
+    
+    async def cancel_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel the current conversation."""
+        user_id = update.effective_user.id
+        
+        # Clear any pending work entries
+        if user_id in self.pending_work_entries:
+            del self.pending_work_entries[user_id]
+        
+        await update.message.reply_text(
+            "Operation cancelled.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        
+        return ConversationHandler.END
+    
+    async def handle_client_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle client code input during conversation."""
+        if not self._is_user_allowed(update):
+            return ConversationHandler.END
+        
+        user_id = update.effective_user.id
+        user_input = update.message.text.strip()
+        
+        # Check if we have a pending work entry for this user
+        if user_id not in self.pending_work_entries:
+            await update.message.reply_text(
+                "No pending work entry found. Please start over."
+            )
+            return ConversationHandler.END
+        
+        # Get the pending work entry
+        work_data = self.pending_work_entries[user_id]
+        client_name = work_data.get("client", "Unknown")
+        
+        # Normalize and validate the client code
+        if user_input and len(user_input) >= 1:
+            # Add the mapping
+            self.client_mapper.add_mapping(client_name, user_input)
+            
+            # Update the work entry with the client code
+            normalized_code = self.client_mapper._normalize_code(user_input)
+            work_data["client_code"] = normalized_code
+            
+            # Save the work entry
+            success = self.sheets.add_work_entry(work_data, test_mode=self.test_mode)
+            
+            # Clear the pending entry
+            del self.pending_work_entries[user_id]
+            
+            if success:
+                # Prepare response message
+                response = f"✅ Work entry saved with client code: {normalized_code}\n\n"
+                response += f"📅 Date: {work_data['date']}\n"
+                response += f"👥 Client: {work_data['client']} ({normalized_code})\n"
+                response += f"⏱️ Hours: {work_data['hours']}\n"
+                response += f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
+                response += f"📝 Description: {work_data['description'][:50]}...\n"
+                
+                if self.test_mode:
+                    response += f"\n🔍 Note: This entry was added to a test sheet for validation. "
+                    response += f"Use /enable_production to start writing to your actual sheet."
+                
+                await update.message.reply_text(response, reply_markup=ReplyKeyboardRemove())
+                return ConversationHandler.END
+            else:
+                await update.message.reply_text(
+                    "❌ Failed to save work entry. Please try again.",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                return ConversationHandler.END
+        else:
+            # Invalid input
+            await update.message.reply_text(
+                f"Invalid client code. Please enter a valid 3-letter code for {client_name}:"
+            )
+            return self.WAITING_FOR_CLIENT_CODE
     
     async def setup(self):
         """Set up the bot, including loading plugins."""

@@ -162,6 +162,10 @@ class TestBramifyBot:
     @pytest.mark.asyncio
     async def test_process_message_work_entry(self, bot):
         """Test processing a message that contains work information."""
+        # Add client mapper
+        bot.client_mapper = MagicMock()
+        bot.client_mapper.get_code.return_value = "TST"  # Mock that we have a code
+        
         # Configure mock Claude to return a work entry
         bot.claude.analyze_work_entry = AsyncMock()
         bot.claude.analyze_work_entry.return_value = {
@@ -180,12 +184,71 @@ class TestBramifyBot:
         # Verify Claude was called
         bot.claude.analyze_work_entry.assert_called_once()
         
+        # Verify client code was looked up
+        bot.client_mapper.get_code.assert_called_once_with("Test Client")
+        
         # Verify work entry was added
         bot.sheets.add_work_entry.assert_called_once()
         
         # Verify response contains work details
         assert "✅ I've registered your work" in response
-        assert "Test Client" in response
+        assert "Test Client (TST)" in response
+    
+    @pytest.mark.asyncio
+    async def test_process_message_work_entry_no_client_code(self, bot):
+        """Test processing a message with a new client (no code yet)."""
+        # Add client mapper
+        bot.client_mapper = MagicMock()
+        bot.client_mapper.get_code.return_value = None  # No code yet
+        bot.client_mapper.suggest_code_for_client.return_value = "TES"
+        
+        # Create pending_work_entries dict
+        bot.pending_work_entries = {}
+        
+        # Configure mock Claude to return a work entry
+        bot.claude.analyze_work_entry = AsyncMock()
+        bot.claude.analyze_work_entry.return_value = {
+            "is_work_entry": True,
+            "date": "25-03-2025",
+            "client": "Test Client",
+            "hours": 3.5,
+            "billable": True,
+            "description": "Test work description",
+            "hourly_rate": 85
+        }
+        
+        # Create a mock update
+        mock_update = MagicMock()
+        mock_update.message.reply_text = AsyncMock()
+        
+        # Call the method with the update
+        response = await bot._process_message(
+            "I worked on Test Client for 3.5 hours today", 
+            12345, 
+            mock_update
+        )
+        
+        # Verify Claude was called
+        bot.claude.analyze_work_entry.assert_called_once()
+        
+        # Verify client code was looked up
+        bot.client_mapper.get_code.assert_called_once_with("Test Client")
+        
+        # Verify a code was suggested
+        bot.client_mapper.suggest_code_for_client.assert_called_once_with("Test Client")
+        
+        # Verify pending work entry was stored
+        assert 12345 in bot.pending_work_entries
+        assert bot.pending_work_entries[12345]["client"] == "Test Client"
+        
+        # Verify user was prompted for a code
+        mock_update.message.reply_text.assert_called_once()
+        call_args = mock_update.message.reply_text.call_args[0][0]
+        assert "client code" in call_args.lower()
+        assert "TES" in call_args  # Suggested code
+        
+        # Verify we're waiting for the code
+        assert response == bot.WAITING_FOR_CLIENT_CODE
     
     @pytest.mark.asyncio
     async def test_process_message_conversation(self, bot):
@@ -263,6 +326,48 @@ class TestBramifyBot:
         
         # Verify response
         mock_update.message.reply_text.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_handle_client_code(self, bot, mock_update):
+        """Test handling client code input during conversation."""
+        # Set up client mapper
+        bot.client_mapper = MagicMock()
+        bot.client_mapper._normalize_code.return_value = "TST"
+        
+        # Set up a pending work entry
+        bot.pending_work_entries = {
+            12345: {
+                "date": "25-03-2025",
+                "client": "Test Client",
+                "hours": 3.5,
+                "billable": True,
+                "description": "Test work description"
+            }
+        }
+        
+        # Set up the message text
+        mock_update.message.text = "TST"
+        
+        # Configure success response for add_work_entry
+        bot.sheets.add_work_entry.return_value = True
+        
+        # Call the handler
+        result = await bot.handle_client_code(mock_update, MagicMock())
+        
+        # Verify mapping was added
+        bot.client_mapper.add_mapping.assert_called_once_with("Test Client", "TST")
+        
+        # Verify work entry was added with the client code
+        bot.sheets.add_work_entry.assert_called_once()
+        work_data = bot.sheets.add_work_entry.call_args[0][0]
+        assert work_data["client_code"] == "TST"
+        
+        # Verify the entry was removed from pending
+        assert 12345 not in bot.pending_work_entries
+        
+        # Verify the conversation ended
+        from telegram.ext import ConversationHandler
+        assert result == ConversationHandler.END
     
     @pytest.mark.asyncio
     async def test_setup_and_run(self, bot):
