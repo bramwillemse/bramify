@@ -269,11 +269,11 @@ class SummaryPlugin(PluginBase):
         Returns:
             Help text describing the plugin and its commands
         """
-        help_text = f"*{self.name}*: Generate summaries of your worked hours for different periods\n\n"
-        help_text += "*Commands:*\n"
-        help_text += "/today - Show hours worked today\n"
-        help_text += "/yesterday - Show hours worked yesterday\n"
-        help_text += "/week - Show hours worked this week\n"
-        help_text += "/month - Show hours worked this month\n"
+        help_text = f"*{self.name}*: Genereer overzichten van je gewerkte uren voor verschillende periodes\n\n"
+        help_text += "*Commando's:*\n"
+        help_text += "/today - Toon uren gewerkt vandaag\n"
+        help_text += "/yesterday - Toon uren gewerkt gisteren\n"
+        help_text += "/week - Toon uren gewerkt deze week\n"
+        help_text += "/month - Toon uren gewerkt deze maand\n"
         
         return help_text

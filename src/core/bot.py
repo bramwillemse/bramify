@@ -92,9 +92,9 @@ class BramifyBot:
             return
         
         await update.message.reply_text(
-            "Hello! I'm Bramify, your personal assistant for hour registration. "
-            "How can I help you today?\n\n"
-            "You can tell me about your work or use /help to see available commands."
+            "Hallo! Ik ben Bramify, je persoonlijke assistent voor urenregistratie. "
+            "Hoe kan ik je vandaag helpen?\n\n"
+            "Je kunt me vertellen over je werk of gebruik /help om beschikbare commando's te zien."
         )
     
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,17 +104,18 @@ class BramifyBot:
         
         base_help_text = (
             "🤖 *Bramify Help* 🤖\n\n"
-            "*Core Commands:*\n"
-            "/start - Start interacting with the bot\n"
-            "/help - Show this help message\n"
-            "/test_mode or /testmode - Write hours to test sheet only\n"
-            "/enable_production or /enableproduction - Write hours to the actual sheet\n\n"
+            "*Commando's:*\n"
+            "/start - Start een gesprek met de bot\n"
+            "/help - Toon dit help-bericht\n"
+            "/test_mode of /testmode - Schrijf uren alleen naar het testblad\n"
+            "/enable_production of /enableproduction - Schrijf uren naar het echte blad\n"
+            "/list_clients - Bekijk alle bekende klantcodes\n\n"
             
-            "*Hour Registration:*\n"
-            "Just tell me what you worked on today, and I'll register your hours. "
-            "For example: 'Today I worked on Project X for Client Y for 4 hours.'\n\n"
+            "*Urenregistratie:*\n"
+            "Vertel me gewoon waar je aan gewerkt hebt, en ik registreer je uren. "
+            "Bijvoorbeeld: 'Vandaag heb ik 4 uur gewerkt aan Project X voor Klant Y.'\n\n"
             
-            f"*Current Mode:* {'Test Mode (data goes to test sheet)' if self.test_mode else 'Production Mode (data goes to actual sheet)'}\n\n"
+            f"*Huidige modus:* {'Test modus (gegevens gaan naar testblad)' if self.test_mode else 'Productie modus (gegevens gaan naar het echte blad)'}\n\n"
         )
         
         # Add plugin help text
@@ -181,25 +182,25 @@ class BramifyBot:
                     success = self.sheets.add_work_entry(work_data, test_mode=self.test_mode)
                     
                     # Prepare response
-                    response = f"✅ I've registered your work:\n\n"
-                    response += f"📅 Date: {work_data['date']}\n"
-                    response += f"👥 Client: {work_data['client']} ({client_code})\n"
-                    response += f"⏱️ Hours: {work_data['hours']}\n"
-                    response += f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
-                    response += f"📝 Description: {work_data['description'][:50]}...\n"
+                    response = f"✅ Ik heb je werk geregistreerd:\n\n"
+                    response += f"📅 Datum: {work_data['date']}\n"
+                    response += f"👥 Klant: {work_data['client']} ({client_code})\n"
+                    response += f"⏱️ Uren: {work_data['hours']}\n"
+                    response += f"💰 Declarabel: {'Ja' if work_data['billable'] else 'Nee'}\n"
+                    response += f"📝 Beschrijving: {work_data['description'][:50]}...\n"
                     
                     # Show revenue for billable hours
                     if work_data.get('billable', True) and work_data.get('hours'):
                         hourly_rate = work_data.get('hourly_rate', 85)
                         revenue = float(work_data['hours']) * hourly_rate
-                        response += f"💵 Revenue: €{revenue:.2f}\n\n"
+                        response += f"💵 Omzet: €{revenue:.2f}\n\n"
                     else:
                         response += "\n"
                     
                     if self.test_mode:
-                        response += f"🔍 Note: This entry was added to a test sheet for validation. "
-                        response += f"Once you confirm it's working correctly, you can use the /enableproduction "
-                        response += f"command to start writing to your actual sheet."
+                        response += f"🔍 Let op: Deze registratie is toegevoegd aan een testblad voor validatie. "
+                        response += f"Zodra je hebt bevestigd dat het correct werkt, kun je het commando /enableproduction "
+                        response += f"gebruiken om naar het echte urenblad te schrijven."
                     
                     return response
                 elif update:
@@ -210,9 +211,9 @@ class BramifyBot:
                     suggested_code = self.client_mapper.suggest_code_for_client(client_name)
                     
                     # Ask for the client code
-                    prompt = f"I need a 3-letter client code for '{client_name}'.\n\n"
-                    prompt += f"Suggested code: {suggested_code}\n\n"
-                    prompt += "Please enter a 3-letter code for this client (or use the suggestion):"
+                    prompt = f"Ik heb een 3-letter klantcode nodig voor '{client_name}'.\n\n"
+                    prompt += f"Voorgestelde code: {suggested_code}\n\n"
+                    prompt += "Voer een 3-letter code in voor deze klant (of gebruik de suggestie):"
                     
                     await update.message.reply_text(prompt)
                     
@@ -221,14 +222,14 @@ class BramifyBot:
                 else:
                     # No update object, so we can't start a conversation
                     logger.error("No update object provided, can't request client code")
-                    return "Sorry, I can't process this work entry without knowing the client code."
+                    return "Sorry, ik kan deze urenregistratie niet verwerken zonder een klantcode."
             else:
                 # Generate a response for a regular conversation
                 return await self.claude.generate_response(message)
                 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-            return "Sorry, I encountered an error processing your message. Please try again."
+            return "Sorry, ik ben een fout tegengekomen bij het verwerken van je bericht. Probeer het opnieuw."
     
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors in the Telegram bot."""
@@ -259,8 +260,8 @@ class BramifyBot:
             
         self.test_mode = False
         await update.message.reply_text(
-            "✅ Production mode enabled. Your work hours will now be saved to the actual sheet. "
-            "Use /test_mode to switch back to test mode if needed."
+            "✅ Productiemodus ingeschakeld. Je uren worden nu opgeslagen in het echte urenblad. "
+            "Gebruik /test_mode om terug te schakelen naar testmodus indien nodig."
         )
         
     async def cmd_test_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -270,8 +271,8 @@ class BramifyBot:
             
         self.test_mode = True
         await update.message.reply_text(
-            "✅ Test mode enabled. Your work hours will be saved to a test sheet for validation. "
-            "Use /enable_production to switch to production mode when ready."
+            "✅ Testmodus ingeschakeld. Je uren worden opgeslagen in een testblad voor validatie. "
+            "Gebruik /enable_production om over te schakelen naar productiemodus wanneer je klaar bent."
         )
         
     async def cmd_list_clients(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -284,12 +285,12 @@ class BramifyBot:
         
         if not mappings:
             await update.message.reply_text(
-                "No client codes defined yet. Client codes will be created automatically when you log hours."
+                "Nog geen klantcodes gedefinieerd. Klantcodes worden automatisch aangemaakt wanneer je uren registreert."
             )
             return
         
         # Format the list of clients
-        response = "📋 **Client Codes**\n\n"
+        response = "📋 **Klantcodes**\n\n"
         for client_name, code in mappings.items():
             # Show the original name if possible
             response += f"• `{code}` - {client_name}\n"
@@ -305,7 +306,7 @@ class BramifyBot:
             del self.pending_work_entries[user_id]
         
         await update.message.reply_text(
-            "Operation cancelled.",
+            "Operatie geannuleerd.",
             reply_markup=ReplyKeyboardRemove()
         )
         
@@ -322,7 +323,7 @@ class BramifyBot:
         # Check if we have a pending work entry for this user
         if user_id not in self.pending_work_entries:
             await update.message.reply_text(
-                "No pending work entry found. Please start over."
+                "Geen openstaande urenregistratie gevonden. Begin opnieuw."
             )
             return ConversationHandler.END
         
@@ -347,29 +348,29 @@ class BramifyBot:
             
             if success:
                 # Prepare response message
-                response = f"✅ Work entry saved with client code: {normalized_code}\n\n"
-                response += f"📅 Date: {work_data['date']}\n"
-                response += f"👥 Client: {work_data['client']} ({normalized_code})\n"
-                response += f"⏱️ Hours: {work_data['hours']}\n"
-                response += f"💰 Billable: {'Yes' if work_data['billable'] else 'No'}\n"
-                response += f"📝 Description: {work_data['description'][:50]}...\n"
+                response = f"✅ Urenregistratie opgeslagen met klantcode: {normalized_code}\n\n"
+                response += f"📅 Datum: {work_data['date']}\n"
+                response += f"👥 Klant: {work_data['client']} ({normalized_code})\n"
+                response += f"⏱️ Uren: {work_data['hours']}\n"
+                response += f"💰 Declarabel: {'Ja' if work_data['billable'] else 'Nee'}\n"
+                response += f"📝 Beschrijving: {work_data['description'][:50]}...\n"
                 
                 if self.test_mode:
-                    response += f"\n🔍 Note: This entry was added to a test sheet for validation. "
-                    response += f"Use /enable_production to start writing to your actual sheet."
+                    response += f"\n🔍 Let op: Deze registratie is toegevoegd aan een testblad voor validatie. "
+                    response += f"Gebruik /enable_production om naar het echte urenblad te schrijven."
                 
                 await update.message.reply_text(response, reply_markup=ReplyKeyboardRemove())
                 return ConversationHandler.END
             else:
                 await update.message.reply_text(
-                    "❌ Failed to save work entry. Please try again.",
+                    "❌ Kon de urenregistratie niet opslaan. Probeer het opnieuw.",
                     reply_markup=ReplyKeyboardRemove()
                 )
                 return ConversationHandler.END
         else:
             # Invalid input
             await update.message.reply_text(
-                f"Invalid client code. Please enter a valid 3-letter code for {client_name}:"
+                f"Ongeldige klantcode. Voer een geldige 3-letter code in voor {client_name}:"
             )
             return self.WAITING_FOR_CLIENT_CODE
     

@@ -1,8 +1,10 @@
 """Utilities for Telegram bot integration."""
 
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 from telegram import Update
 from loguru import logger
+from collections import defaultdict
 
 async def send_typing_action(update: Update):
     """
@@ -31,72 +33,13 @@ def format_work_summary(entries: List[Dict[str, Any]], period_type: str = None, 
     if not entries:
         return "Geen werkregistraties gevonden."
     
-    # Debugging information
-    from loguru import logger
-    logger.info(f"Formatting summary for {len(entries)} entries")
-    
-    # Determine period emoji and text
-    period_emoji = "📊"
-    period_info = ""
-    
-    if period_type:
-        if period_type == 'day':
-            period_emoji = "📅"
-            if period_number:
-                # Gebruik dagnaam in plaats van nummer
-                from datetime import datetime
-                # Dagen in het Nederlands
-                days = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag']
-                
-                # Bepaal welke dag het is (voor vandaag, gisteren, etc.)
-                try:
-                    # Maak een datetime met het huidige jaar, maand en de opgegeven dag
-                    today = datetime.now()
-                    date_with_day = datetime(today.year, today.month, period_number)
-                    # Weekdag is 0-6 (maandag=0, zondag=6)
-                    weekday = date_with_day.weekday()
-                    day_name = days[weekday]
-                    period_info = f" - {day_name}"
-                except:
-                    # Bij fouten, val terug op dagnummer
-                    period_info = f" - Dag {period_number}"
-        elif period_type == 'week':
-            period_emoji = "📆"
-            if period_number:
-                period_info = f" - Week {period_number}"
-        elif period_type == 'month':
-            period_emoji = "📋"
-            months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 
-                     'juli', 'augustus', 'september', 'oktober', 'november', 'december']
-            if period_number and 1 <= period_number <= 12:
-                period_info = f" - {months[period_number-1].capitalize()}"
-    
-    # Deduplicate entries based on client/date/description
-    deduped_entries = []
-    seen_entries = set()
-    for entry in entries:
-        # Create a key for deduplication
-        client = entry.get("Client", "")
-        date = entry.get("Date", "")
-        desc = entry.get("Description", "")
-        key = f"{client}|{date}|{desc}"
-        
-        if key not in seen_entries:
-            seen_entries.add(key)
-            deduped_entries.append(entry)
-    
-    if len(deduped_entries) < len(entries):
-        logger.info(f"Removed {len(entries) - len(deduped_entries)} duplicate entries")
-    
-    entries = deduped_entries
-    
-    # Calculate total hours
+    # Calculate totals
     total_hours = 0
     billable_hours = 0
     unbillable_hours = 0
     
     for entry in entries:
-        # Try to convert billable hours first
+        # Try to convert billable hours
         try:
             hours_str = entry.get("Hours", "0")
             if hours_str and not isinstance(hours_str, bool):
@@ -122,103 +65,109 @@ def format_work_summary(entries: List[Dict[str, Any]], period_type: str = None, 
             # Skip entries with invalid hour values
             pass
     
-    # Group by client and description
-    client_descriptions = {}
+    # Format header based on period
+    header = "📊 Gewerkte uren"
+    
+    if period_type == 'month':
+        months = ["januari", "februari", "maart", "april", "mei", "juni", 
+                 "juli", "augustus", "september", "oktober", "november", "december"]
+        if 1 <= period_number <= 12:
+            month_name = months[period_number - 1]
+            current_year = datetime.now().year
+            header = f"📋 **Gewerkte uren {month_name.capitalize()} {current_year}**"
+    elif period_type == 'week':
+        header = f"📋 **Gewerkte uren Week {period_number}**"
+    elif period_type == 'day':
+        # For a single day, we'll still use the template but with fewer entries
+        if entries and 'Date' in entries[0]:
+            date_str = entries[0].get('Date', '')
+            try:
+                if '-' in date_str:
+                    day, month, year = date_str.split('-')
+                    months = ["januari", "februari", "maart", "april", "mei", "juni", 
+                             "juli", "augustus", "september", "oktober", "november", "december"]
+                    if 1 <= int(month) <= 12:
+                        month_name = months[int(month) - 1]
+                        header = f"📋 **Gewerkte uren {int(day)} {month_name} {year}**"
+            except:
+                pass
+    
+    # Generate summary text
+    summary = f"{header}\n"
+    summary += f"*Totaal: {total_hours:.0f} | Declarabel: {billable_hours:.0f} | Niet-declarabel: {unbillable_hours:.0f}*\n\n"
+    
+    # Group entries by date and then by client
+    date_client_entries = defaultdict(lambda: defaultdict(list))
+    
     for entry in entries:
-        client = entry.get("Client", "Ongespecificeerd")
-        description = entry.get("Description", "Ongespecificeerd")
+        date = entry.get('Date', 'Unknown Date')
+        client = entry.get('Client', 'Unknown')
         
-        # Skip entirely empty descriptions
-        if not description or description.strip() == "":
-            continue
-            
-        # Parse hours (billable + unbillable)
+        # Skip entries with no hours
         try:
-            billable_str = entry.get("Hours", "0")
-            unbillable_str = entry.get("Unbillable Hours", "0")
-            
-            billable_val = 0
-            if billable_str and not isinstance(billable_str, bool):
-                billable_str = str(billable_str).replace(',', '.')
-                try:
-                    billable_val = float(billable_str)
-                except (ValueError, TypeError):
-                    billable_val = 0
-                
-            unbillable_val = 0
-            if unbillable_str and not isinstance(unbillable_str, bool):
-                unbillable_str = str(unbillable_str).replace(',', '.')
-                try:
-                    unbillable_val = float(unbillable_str)
-                except (ValueError, TypeError):
-                    unbillable_val = 0
-                
-            # Skip entries met 0 uren (billable + unbillable)
-            if billable_val == 0 and unbillable_val == 0:
+            billable = float(entry.get('Hours', 0) or 0)
+            unbillable = float(entry.get('Unbillable Hours', 0) or 0)
+            if billable == 0 and unbillable == 0:
                 continue
+        except:
+            continue
+            
+        date_client_entries[date][client].append(entry)
+    
+    # Sort dates (most recent first if in DD-MM-YYYY format)
+    sorted_dates = sorted(date_client_entries.keys(), 
+                         key=lambda d: d.split('-')[::-1] if '-' in d and len(d.split('-')) == 3 else d, 
+                         reverse=True)
+    
+    # For each date
+    for date in sorted_dates:
+        # Format date header
+        date_header = date
+        
+        # Try to format date more nicely if it's in DD-MM-YYYY format
+        if '-' in date:
+            try:
+                day, month, year = date.split('-')
+                months = ["januari", "februari", "maart", "april", "mei", "juni", 
+                         "juli", "augustus", "september", "oktober", "november", "december"]
+                weekdays = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"]
                 
-            hours = billable_val + unbillable_val
-        except Exception as e:
-            from loguru import logger
-            logger.error(f"Error parsing hours in format_work_summary: {e}")
-            continue
+                # Convert to date object to get weekday
+                date_obj = datetime(int(year), int(month), int(day))
+                weekday = weekdays[date_obj.weekday()]
+                
+                date_header = f"{weekday} {int(day)} {months[int(month)-1]} {year}"
+            except (ValueError, IndexError):
+                # Keep original if parsing fails
+                pass
         
-        if client not in client_descriptions:
-            client_descriptions[client] = {}
+        summary += f"📅 **{date_header}**\n"
         
-        # Don't include date in description anymore
-        # Add prefix for unbillable hours if needed
-        if unbillable_val > 0 and billable_val == 0:
-            desc_key = f"{description} (niet-factureerbaar)"
-        else:
-            desc_key = description
-        
-        if desc_key not in client_descriptions[client]:
-            client_descriptions[client][desc_key] = 0
+        # Sort clients by their code (alphabetically)
+        for client in sorted(date_client_entries[date].keys()):
+            summary += f"- {client}\n"
             
-        client_descriptions[client][desc_key] += hours
-    
-    # Format the summary
-    summary = f"{period_emoji} *Werk Overzicht{period_info}*\n\n"
-    summary += f"Totale Uren: {total_hours:.1f}\n"
-    summary += f"Factureerbare Uren: {billable_hours:.1f}\n"
-    summary += f"Niet-Factureerbare Uren: {unbillable_hours:.1f}\n\n"
-    
-    # Get only clients with hours > 0
-    client_items = [(client, desc) for client, desc in client_descriptions.items() 
-                   if sum(desc.values()) > 0]
-    
-    # Sort by hours (highest first)
-    client_items = sorted(client_items, 
-                          key=lambda x: sum(x[1].values()), 
-                          reverse=True)
-    
-    # Show all clients with hours
-    for client, descriptions in client_items:
-        client_total = sum(descriptions.values())
-        
-        # Skip clients with 0 hours (shouldn't happen due to filtering above, but just in case)
-        if client_total == 0:
-            continue
+            # Group by description and sum hours
+            description_hours = defaultdict(float)
+            for entry in date_client_entries[date][client]:
+                description = entry.get('Description', '').strip()
+                if not description:
+                    description = "(geen beschrijving)"
+                
+                billable = float(entry.get('Hours', 0) or 0)
+                unbillable = float(entry.get('Unbillable Hours', 0) or 0)
+                total_entry_hours = billable + unbillable
+                
+                if total_entry_hours > 0:
+                    description_hours[description] += total_entry_hours
             
-        summary += f"*{client}*: {client_total:.1f} uren\n"
-        
-        # Sort descriptions by hours (highest first) and limit to top 3
-        desc_items = sorted(descriptions.items(), key=lambda x: x[1], reverse=True)
-        
-        # Only show descriptions with hours > 0
-        desc_items = [(desc, hours) for desc, hours in desc_items if hours > 0]
-        
-        # Show top 3
-        for description, hours in desc_items[:3]:
-            # Truncate description if it's too long
-            short_desc = description[:40] + "..." if len(description) > 40 else description
-            summary += f"  - {short_desc}: {hours:.1f} uren\n"
-        
-        # Add ellipsis if there are more descriptions
-        if len(desc_items) > 3:
-            summary += f"  - ... en {len(desc_items) - 3} meer activiteiten\n"
+            # Add each description with hours
+            for description, hours in description_hours.items():
+                if hours > 0:
+                    summary += f"    - {description} ({hours:.0f}u)\n"
+                else:
+                    summary += f"    - {description}\n"
         
         summary += "\n"
     
-    return summary
+    return summary.strip()
