@@ -1,9 +1,10 @@
 """Anthropic Claude API integration for natural language processing."""
 
 import os
+import re
 from typing import Dict, Any, Optional
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import anthropic
 from loguru import logger
 
@@ -68,6 +69,11 @@ class ClaudeClient:
         }
         """
         
+        # Get current date for reference
+        today = datetime.now()
+        tomorrow = today + timedelta(days=1)
+        yesterday = today - timedelta(days=1)
+        
         user_prompt = f"""
         Analyze the following text and extract:
         
@@ -76,6 +82,14 @@ class ClaudeClient:
         3. Hours worked (uren)
         4. Whether the work is billable (facturabel) - default to true if unclear
         5. Date (datum) - use today if not specified, format as DD-MM-YYYY for Dutch format
+        
+        Important date references:
+        - Today is {today.strftime('%d-%m-%Y')}
+        - Tomorrow is {tomorrow.strftime('%d-%m-%Y')}
+        - Yesterday is {yesterday.strftime('%d-%m-%Y')}
+        
+        For references like "morgen" (tomorrow) or "volgende week" (next week), calculate the actual date.
+        
         6. Description of the work (beschrijving)
         
         User text: {text}
@@ -110,6 +124,32 @@ class ClaudeClient:
             # Set date to today if not provided
             if "date" not in result or not result["date"]:
                 result["date"] = datetime.now().strftime("%d-%m-%Y")
+            
+            # Validate date format and fix if needed
+            if "date" in result and result["date"]:
+                try:
+                    # Try to parse the date to ensure it's valid
+                    date_str = result["date"]
+                    
+                    # Check if it's in the expected DD-MM-YYYY format
+                    if re.match(r'\d{2}-\d{2}-\d{4}', date_str):
+                        # Already in the correct format
+                        pass
+                    elif re.match(r'\d{4}-\d{2}-\d{2}', date_str):
+                        # ISO format (YYYY-MM-DD), convert to DD-MM-YYYY
+                        year, month, day = date_str.split('-')
+                        result["date"] = f"{day}-{month}-{year}"
+                    elif re.match(r'\d{1,2}/\d{1,2}/\d{4}', date_str):
+                        # US format (MM/DD/YYYY or DD/MM/YYYY), assuming DD/MM/YYYY
+                        day, month, year = date_str.split('/')
+                        result["date"] = f"{day.zfill(2)}-{month.zfill(2)}-{year}"
+                    else:
+                        # Unrecognized format, use today
+                        logger.warning(f"Unrecognized date format: {date_str}, using today's date")
+                        result["date"] = datetime.now().strftime("%d-%m-%Y")
+                except Exception as e:
+                    logger.error(f"Error validating date format: {e}, using today's date")
+                    result["date"] = datetime.now().strftime("%d-%m-%Y")
                 
             return result
                 

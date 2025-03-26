@@ -131,6 +131,45 @@ async def test_analyze_work_entry_no_date(claude_client, mock_anthropic_client):
 
 
 @pytest.mark.asyncio
+async def test_date_format_validation(claude_client, mock_anthropic_client):
+    """Test validation and correction of different date formats."""
+    date_test_cases = [
+        # Input date format, expected output format
+        ("2025-03-26", "26-03-2025"),  # ISO format
+        ("26/03/2025", "26-03-2025"),  # European with slash
+        ("3/26/2025", "26-03-2025"),   # US format with slash
+        ("invalid-date", "25-03-2025"),  # Invalid format should default to today
+        ("26-03-2025", "26-03-2025"),  # Already correct format
+    ]
+    
+    for input_date, expected_date in date_test_cases:
+        # Mock response with different date format
+        mock_response = {
+            "is_work_entry": True,
+            "client": "Test Client",
+            "hours": 3.5,
+            "billable": True,
+            "date": input_date,
+            "description": f"Test work on {input_date}",
+            "hourly_rate": 85
+        }
+        
+        mock_anthropic_client.messages.create.return_value = MockAnthropicResponse(json.dumps(mock_response))
+        
+        # Test with mocked today's date
+        with patch("src.integrations.claude.client.datetime") as mock_datetime:
+            # For invalid date fallback
+            mock_now = MagicMock()
+            mock_now.strftime.return_value = "25-03-2025"
+            mock_datetime.now.return_value = mock_now
+            
+            result = await claude_client.analyze_work_entry(f"3.5 hours on {input_date}")
+        
+        # Verify date format was corrected
+        assert result["date"] == expected_date, f"Failed for input date: {input_date}"
+
+
+@pytest.mark.asyncio
 async def test_generate_response(claude_client, mock_anthropic_client):
     """Test generating a response."""
     # Mock response
