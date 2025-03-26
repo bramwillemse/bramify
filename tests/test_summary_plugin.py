@@ -186,7 +186,7 @@ async def test_command_registration(summary_plugin):
     assert result is True
     
     # Check if command handlers are registered
-    assert len(summary_plugin.command_handlers) == 5
+    assert len(summary_plugin.command_handlers) == 4  # today, yesterday, week, month
     
     # We kunnen niet direct de commands extraheren, maar we kunnen testen
     # of de juiste aantal commands is geregistreerd
@@ -198,13 +198,12 @@ def test_get_help(summary_plugin):
     help_text = summary_plugin.get_help()
     
     # Verify help text content
-    assert "Uren Overzicht" in help_text
     assert "/today" in help_text
     assert "/yesterday" in help_text
     assert "/week" in help_text
     assert "/month" in help_text
-    assert "/summary" in help_text
-    assert "Voorbeelden" in help_text
+    # /summary should no longer be in the help text
+    assert "/summary" not in help_text
 
 
 def test_format_work_summary():

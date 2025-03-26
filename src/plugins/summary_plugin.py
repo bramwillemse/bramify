@@ -37,11 +37,10 @@ class SummaryPlugin(PluginBase):
             True als initialisatie succesvol was, False anders
         """
         # Register commands
-        self.register_command("today", self.cmd_today, "Toon urenregistratie voor vandaag")
-        self.register_command("yesterday", self.cmd_yesterday, "Toon urenregistratie voor gisteren")
-        self.register_command("week", self.cmd_week, "Toon urenregistratie voor deze week")
-        self.register_command("month", self.cmd_month, "Toon urenregistratie voor deze maand")
-        self.register_command("summary", self.cmd_summary, "Toon urenregistratie voor een specifieke periode")
+        self.register_command("today", self.cmd_today, "Show hours worked today")
+        self.register_command("yesterday", self.cmd_yesterday, "Show hours worked yesterday")
+        self.register_command("week", self.cmd_week, "Show hours worked this week")
+        self.register_command("month", self.cmd_month, "Show hours worked this month")
         
         return True
     
@@ -60,20 +59,6 @@ class SummaryPlugin(PluginBase):
     async def cmd_month(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Verwerk het /month commando."""
         await self._show_summary(update, context, "this month")
-    
-    async def cmd_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        Verwerk het /summary commando met optionele periode parameter.
-        
-        Gebruik: /summary [periode]
-        waarbij periode kan zijn: today, yesterday, week, month, last week, last month
-        """
-        # Get the period from arguments or default to "week"
-        period = "week"
-        if context.args and len(context.args) > 0:
-            period = " ".join(context.args).lower()
-            
-        await self._show_summary(update, context, period)
     
     async def _show_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE, period: str) -> None:
         """
@@ -279,22 +264,16 @@ class SummaryPlugin(PluginBase):
     
     def get_help(self) -> str:
         """
-        Haal helptekst op voor deze plugin.
+        Get help text for this plugin.
         
         Returns:
-            Helptekst die de plugin en zijn commando's beschrijft
+            Help text describing the plugin and its commands
         """
-        # Maak de helptekst van scratch, zonder super().get_help() te gebruiken
-        help_text = f"*{self.name}*: Genereer overzichten van je gewerkte uren voor verschillende periodes\n\n"
-        help_text += "*Commando's:*\n"
-        help_text += "/today - Toon urenregistratie voor vandaag\n"
-        help_text += "/yesterday - Toon urenregistratie voor gisteren\n"
-        help_text += "/week - Toon urenregistratie voor deze week\n"
-        help_text += "/month - Toon urenregistratie voor deze maand\n"
-        help_text += "/summary [periode] - Toon urenregistratie voor een specifieke periode\n"
-        help_text += "\n"
-        help_text += "*Voorbeelden:*\n"
-        help_text += "/summary last week - Toon urenregistratie voor vorige week\n"
-        help_text += "/summary last month - Toon urenregistratie voor vorige maand\n"
+        help_text = f"*{self.name}*: Generate summaries of your worked hours for different periods\n\n"
+        help_text += "*Commands:*\n"
+        help_text += "/today - Show hours worked today\n"
+        help_text += "/yesterday - Show hours worked yesterday\n"
+        help_text += "/week - Show hours worked this week\n"
+        help_text += "/month - Show hours worked this month\n"
         
         return help_text
